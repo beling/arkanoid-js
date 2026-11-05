@@ -50,6 +50,11 @@
     slow: { letter: 'S', color: '#a78bfa', label: 'WOLNIEJSZA PIŁKA' },
   };
 
+  const TAU = Math.PI * 2;
+  const REDUCED_MOTION =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   /* ---------- Pomocnicze ---------- */
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -69,6 +74,75 @@
     context.arcTo(x, y + height, x, y, r);
     context.arcTo(x, y, x + width, y, r);
     context.closePath();
+  }
+
+  function hexToRgb(hex) {
+    const raw = hex.replace('#', '');
+    const full =
+      raw.length === 3
+        ? raw
+            .split('')
+            .map((char) => char + char)
+            .join('')
+        : raw;
+    const value = Number.parseInt(full, 16);
+    if (!Number.isFinite(value)) return '255, 255, 255';
+    return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
+  }
+
+  /*
+   * Poświata rysowana jest raz do offscreenowego canvasu i cache'owana,
+   * dzięki czemu setki klocków nie płacą kosztu shadowBlur w każdej klatce.
+   */
+  const glowCache = new Map();
+
+  function glowSprite(color, width, height, radius, blur) {
+    const key = `${color}|${width}|${height}|${radius}|${blur}`;
+    const cached = glowCache.get(key);
+    if (cached) return cached;
+
+    const pad = Math.ceil(blur * 1.8);
+    const sprite = document.createElement('canvas');
+    sprite.width = Math.max(1, Math.ceil(width + pad * 2));
+    sprite.height = Math.max(1, Math.ceil(height + pad * 2));
+
+    const spriteCtx = sprite.getContext('2d');
+    spriteCtx.shadowColor = color;
+    spriteCtx.shadowBlur = blur;
+    spriteCtx.fillStyle = color;
+    roundRectPath(spriteCtx, pad, pad, width, height, radius);
+    spriteCtx.fill();
+    spriteCtx.fill();
+
+    const entry = { canvas: sprite, pad };
+    glowCache.set(key, entry);
+    return entry;
+  }
+
+  function createNebula() {
+    const sprite = document.createElement('canvas');
+    sprite.width = W;
+    sprite.height = H;
+
+    const spriteCtx = sprite.getContext('2d');
+    spriteCtx.globalCompositeOperation = 'lighter';
+
+    const blobs = [
+      { x: W * 0.16, y: H * 0.1, r: 360, inner: 'rgba(34, 211, 238, 0.24)' },
+      { x: W * 0.88, y: H * 0.26, r: 400, inner: 'rgba(99, 102, 241, 0.24)' },
+      { x: W * 0.5, y: H * 1.02, r: 440, inner: 'rgba(168, 85, 247, 0.22)' },
+    ];
+
+    for (const blob of blobs) {
+      const gradient = spriteCtx.createRadialGradient(blob.x, blob.y, 0, blob.x, blob.y, blob.r);
+      gradient.addColorStop(0, blob.inner);
+      gradient.addColorStop(0.6, 'rgba(30, 41, 59, 0.08)');
+      gradient.addColorStop(1, 'rgba(5, 7, 15, 0)');
+      spriteCtx.fillStyle = gradient;
+      spriteCtx.fillRect(blob.x - blob.r, blob.y - blob.r, blob.r * 2, blob.r * 2);
+    }
+
+    return sprite;
   }
 
   /* ---------- Elementy strony ---------- */
@@ -239,6 +313,248 @@
     }
   }
 
+  /* ---------- Efekty wizualne ---------- */
+
+  class Effects {
+    constructor() {
+      this.particles = [];
+      this.rings = [];
+      this.floaters = [];
+      this.shake = 0;
+      this.flash = 0;
+      this.flashColor = '255, 255, 255';
+      this.paddleGlow = 0;
+    }
+
+    clear() {
+      this.particles.length = 0;
+      this.rings.length = 0;
+      this.floaters.length = 0;
+      this.shake = 0;
+      this.flash = 0;
+      this.paddleGlow = 0;
+    }
+
+    addParticle(particle) {
+      if (this.particles.length > 360) return;
+      this.particles.push(particle);
+    }
+
+    burst(x, y, color, count, speed = 240, size = 3, duration = 0.6) {
+      const total = REDUCED_MOTION ? Math.ceil(count * 0.4) : count;
+
+      for (let index = 0; index < total; index += 1) {
+        const angle = rand(0, TAU);
+        const velocity = rand(speed * 0.3, speed);
+        const life = rand(duration * 0.55, duration);
+
+        this.addParticle({
+          x,
+          y,
+          vx: Math.cos(angle) * velocity,
+          vy: Math.sin(angle) * velocity,
+          life,
+          maxLife: life,
+          size: rand(size * 0.5, size * 1.3),
+          color,
+          drag: 2.8,
+          gravity: 340,
+          rot: 0,
+          spin: 0,
+          shape: 'spark',
+          w: 0,
+          h: 0,
+        });
+      }
+    }
+
+    shards(x, y, color, count) {
+      const total = REDUCED_MOTION ? Math.ceil(count * 0.35) : count;
+
+      for (let index = 0; index < total; index += 1) {
+        const angle = rand(-Math.PI * 0.92, -Math.PI * 0.08);
+        const velocity = rand(90, 330);
+        const life = rand(0.4, 0.9);
+
+        this.addParticle({
+          x: x + rand(-BRICK_W * 0.34, BRICK_W * 0.34),
+          y: y + rand(-BRICK_H * 0.3, BRICK_H * 0.3),
+          vx: Math.cos(angle) * velocity,
+          vy: Math.sin(angle) * velocity,
+          life,
+          maxLife: life,
+          size: 0,
+          color,
+          drag: 1.6,
+          gravity: 760,
+          rot: rand(0, TAU),
+          spin: rand(-12, 12),
+          shape: 'shard',
+          w: rand(4, 11),
+          h: rand(2.5, 5.5),
+        });
+      }
+    }
+
+    trail(x, y, color) {
+      const life = rand(0.25, 0.5);
+
+      this.addParticle({
+        x,
+        y,
+        vx: rand(-14, 14),
+        vy: rand(-52, -16),
+        life,
+        maxLife: life,
+        size: rand(1.2, 2.4),
+        color,
+        drag: 1.2,
+        gravity: -40,
+        rot: 0,
+        spin: 0,
+        shape: 'spark',
+        w: 0,
+        h: 0,
+      });
+    }
+
+    ring(x, y, color, radius = 60, width = 3) {
+      this.rings.push({
+        x,
+        y,
+        color,
+        start: radius * 0.18,
+        target: radius,
+        width,
+        life: 0.5,
+        maxLife: 0.5,
+      });
+    }
+
+    float(x, y, text, color) {
+      this.floaters.push({ x, y, text, color, life: 0.9, maxLife: 0.9 });
+    }
+
+    addShake(amount) {
+      if (REDUCED_MOTION) return;
+      this.shake = Math.min(10, this.shake + amount);
+    }
+
+    addFlash(amount, color) {
+      if (color) this.flashColor = color;
+      this.flash = Math.max(this.flash, REDUCED_MOTION ? amount * 0.35 : amount);
+    }
+
+    update(dt) {
+      for (let index = this.particles.length - 1; index >= 0; index -= 1) {
+        const particle = this.particles[index];
+        particle.life -= dt;
+
+        if (particle.life <= 0) {
+          this.particles.splice(index, 1);
+          continue;
+        }
+
+        const damp = Math.exp(-particle.drag * dt);
+        particle.vx *= damp;
+        particle.vy = particle.vy * damp + particle.gravity * dt;
+        particle.x += particle.vx * dt;
+        particle.y += particle.vy * dt;
+        particle.rot += particle.spin * dt;
+      }
+
+      for (let index = this.rings.length - 1; index >= 0; index -= 1) {
+        const ring = this.rings[index];
+        ring.life -= dt;
+        if (ring.life <= 0) this.rings.splice(index, 1);
+      }
+
+      for (let index = this.floaters.length - 1; index >= 0; index -= 1) {
+        const floater = this.floaters[index];
+        floater.life -= dt;
+        floater.y -= 46 * dt;
+        if (floater.life <= 0) this.floaters.splice(index, 1);
+      }
+
+      this.shake *= Math.exp(-dt * 6.5);
+      if (this.shake < 0.02) this.shake = 0;
+
+      this.flash *= Math.exp(-dt * 5.5);
+      if (this.flash < 0.004) this.flash = 0;
+
+      this.paddleGlow *= Math.exp(-dt * 9);
+    }
+
+    drawRings(ctx) {
+      if (this.rings.length === 0) return;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      for (const ring of this.rings) {
+        const progress = 1 - ring.life / ring.maxLife;
+        const eased = 1 - (1 - progress) * (1 - progress);
+        const radius = ring.start + (ring.target - ring.start) * eased;
+
+        ctx.globalAlpha = (1 - progress) * 0.6;
+        ctx.strokeStyle = ring.color;
+        ctx.lineWidth = ring.width * (1 - progress) + 0.6;
+        ctx.beginPath();
+        ctx.arc(ring.x, ring.y, radius, 0, TAU);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    drawParticles(ctx) {
+      if (this.particles.length === 0) return;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      for (const particle of this.particles) {
+        const ratio = particle.life / particle.maxLife;
+        ctx.globalAlpha = clamp(ratio * 1.25, 0, 1);
+        ctx.fillStyle = particle.color;
+
+        if (particle.shape === 'shard') {
+          ctx.save();
+          ctx.translate(particle.x, particle.y);
+          ctx.rotate(particle.rot);
+          ctx.fillRect(-particle.w / 2, -particle.h / 2, particle.w, particle.h);
+          ctx.restore();
+        } else {
+          ctx.beginPath();
+          ctx.arc(particle.x, particle.y, particle.size * (0.4 + ratio * 0.85), 0, TAU);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    drawFloaters(ctx) {
+      if (this.floaters.length === 0) return;
+
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '700 15px ui-monospace, Consolas, monospace';
+
+      for (const floater of this.floaters) {
+        const ratio = floater.life / floater.maxLife;
+        ctx.globalAlpha = clamp(ratio * 1.6, 0, 1);
+        ctx.fillStyle = floater.color;
+        ctx.shadowColor = floater.color;
+        ctx.shadowBlur = 10;
+        ctx.fillText(floater.text, floater.x, floater.y);
+      }
+
+      ctx.restore();
+    }
+  }
+
   /* ---------- Gra ---------- */
 
   class Game {
@@ -255,6 +571,16 @@
       this.levelIndex = 0;
       this.best = this.loadBest();
       this.audio = new SoundEngine();
+      this.fx = new Effects();
+      this.nebula = createNebula();
+      this.stars = Array.from({ length: 120 }, () => ({
+        x: rand(0, W),
+        y: rand(0, H),
+        r: rand(0.55, 1.7),
+        alpha: rand(0.14, 0.7),
+        speed: rand(4, 20),
+        phase: rand(0, TAU),
+      }));
 
       this.bricks = [];
       this.balls = [];
@@ -317,6 +643,7 @@
         this.acc = 0;
       }
 
+      this.fx.update(delta);
       this.render();
       requestAnimationFrame((next) => this.loop(next));
     }
@@ -646,7 +973,10 @@
         }
       }
 
-      if (ball.y - ball.r > H) ball.dead = true;
+      if (ball.y - ball.r > H) {
+        ball.dead = true;
+        this.fx.burst(ball.x, H - 6, '#fb7185', 18, 270, 3.2, 0.7);
+      }
     }
 
     collidePaddle(ball) {
@@ -676,6 +1006,10 @@
       ball.vx = vx * correction;
       ball.vy = vy * correction;
       ball.y = paddle.y - ball.r - 0.5;
+
+      this.fx.burst(ball.x, paddle.y, '#7dd3fc', 8, 190, 2.6, 0.38);
+      this.fx.paddleGlow = 1;
+      this.fx.addShake(0.6);
       this.audio.play('paddle');
     }
 
@@ -714,8 +1048,12 @@
     }
 
     hitBrick(brick) {
+      const centerX = brick.x + brick.w / 2;
+      const centerY = brick.y + brick.h / 2;
+
       if (brick.steel) {
         brick.flash = 0.12;
+        this.fx.burst(centerX, centerY, '#cbd5e1', 5, 160, 2.4, 0.32);
         this.audio.play('steel');
         return;
       }
@@ -724,10 +1062,20 @@
       brick.flash = 0.14;
       this.audio.play('brick', Math.round((brick.y - BRICK_TOP) / (BRICK_H + ROW_GAP)));
 
-      if (brick.hp > 0) return;
+      if (brick.hp > 0) {
+        this.fx.burst(centerX, centerY, brick.color, 7, 200, 2.6, 0.4);
+        this.fx.addShake(0.7);
+        return;
+      }
 
       brick.dead = true;
       this.addScore(brick.points);
+
+      this.fx.shards(centerX, centerY, brick.color, 16);
+      this.fx.burst(centerX, centerY, '#f8fafc', 5, 260, 2, 0.3);
+      this.fx.ring(centerX, centerY, brick.color, Math.max(brick.w, brick.h) * 1.5, 2.4);
+      this.fx.float(centerX, brick.y, `+${brick.points}`, '#f8fafc');
+      this.fx.addShake(1.5);
 
       if (Math.random() < POWERUP_CHANCE && this.powerups.length < MAX_POWERUPS) {
         this.dropPowerup(brick);
@@ -776,6 +1124,7 @@
       this.balls = [];
       this.powerups = [];
       this.effects = { expand: 0, slow: 0 };
+      this.fx.clear();
       this.toastText = '';
       this.toastTime = 0;
       this.hudTimer = 0;
@@ -850,6 +1199,11 @@
       this.saveBest();
       this.hideHint();
 
+      this.fx.addFlash(0.2, '103, 232, 249');
+      this.fx.addShake(5);
+      this.fx.ring(W / 2, H * 0.55, '#67e8f9', 460, 4);
+      this.fx.burst(W / 2, H * 0.55, '#a5f3fc', 24, 340, 3, 0.9);
+
       const isLast = this.levelIndex >= LEVELS.length - 1;
       if (isLast) {
         this.state = 'won';
@@ -892,7 +1246,16 @@
 
       for (let index = this.powerups.length - 1; index >= 0; index -= 1) {
         const powerup = this.powerups[index];
+        const meta = POWERUPS[powerup.type];
         powerup.y += powerup.vy * dt;
+
+        if (meta && Math.random() < 1 - Math.exp(-dt * 26)) {
+          this.fx.trail(
+            powerup.x + rand(-powerup.w * 0.3, powerup.w * 0.3),
+            powerup.y + powerup.h * 0.4,
+            meta.color,
+          );
+        }
 
         const caught =
           powerup.x + powerup.w / 2 > paddle.x &&
@@ -923,6 +1286,11 @@
       } else if (type === 'multi') {
         this.splitBalls();
       }
+
+      const paddleCenter = this.paddle.x + this.paddle.w / 2;
+      this.fx.burst(paddleCenter, this.paddle.y, meta.color, 22, 280, 3.4, 0.7);
+      this.fx.ring(paddleCenter, this.paddle.y, meta.color, 130, 3);
+      this.fx.addFlash(0.1, hexToRgb(meta.color));
 
       this.toast(meta.label);
       this.syncChips();
@@ -955,6 +1323,10 @@
       this.balls = [];
       this.lives -= 1;
 
+      this.fx.addShake(9);
+      this.fx.addFlash(0.3, '248, 113, 113');
+      this.fx.ring(W / 2, H - 24, '#f87171', 320, 3.5);
+
       if (this.lives <= 0) {
         this.gameOver();
         return;
@@ -976,6 +1348,8 @@
 
     gameOver() {
       this.state = 'gameOver';
+      this.fx.addFlash(0.26, '248, 113, 113');
+      this.fx.addShake(7);
       this.balls = [];
       this.powerups = [];
       this.effects = { expand: 0, slow: 0 };
@@ -1011,6 +1385,12 @@
         this.saveBest();
       }
       this.updateHud();
+
+      if (ui.score) {
+        ui.score.classList.remove('is-pop');
+        void ui.score.offsetWidth;
+        ui.score.classList.add('is-pop');
+      }
     }
 
     loadBest() {
@@ -1240,20 +1620,69 @@
       ctx.clearRect(0, 0, W, H);
 
       this.drawBackground(ctx);
+
+      const shake = this.fx.shake;
+      const offsetX = shake > 0.02 ? rand(-shake, shake) : 0;
+      const offsetY = shake > 0.02 ? rand(-shake, shake) : 0;
+
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+
       this.drawBricks(ctx);
+      this.fx.drawRings(ctx);
       this.drawPowerups(ctx);
       this.drawPaddle(ctx);
       this.drawBalls(ctx);
+      this.fx.drawParticles(ctx);
+      this.fx.drawFloaters(ctx);
       this.drawToast(ctx);
+
+      ctx.restore();
+
+      this.drawVignette(ctx);
+      this.drawFlash(ctx);
+    }
+
+    drawStars(ctx) {
+      ctx.save();
+      ctx.fillStyle = '#bae6fd';
+
+      for (const star of this.stars) {
+        const y = ((star.y + this.time * star.speed) % (H + 40)) - 20;
+        const twinkle = 0.6 + 0.4 * Math.sin(this.time * 1.8 + star.phase);
+
+        ctx.globalAlpha = clamp(star.alpha * twinkle, 0, 1);
+        ctx.beginPath();
+        ctx.arc(star.x, y, star.r, 0, TAU);
+        ctx.fill();
+      }
+
+      ctx.restore();
     }
 
     drawBackground(ctx) {
       const backdrop = ctx.createLinearGradient(0, 0, 0, H);
-      backdrop.addColorStop(0, '#070b1a');
-      backdrop.addColorStop(0.55, '#0a1024');
-      backdrop.addColorStop(1, '#0c1430');
+      backdrop.addColorStop(0, '#060917');
+      backdrop.addColorStop(0.55, '#080f22');
+      backdrop.addColorStop(1, '#0b1430');
       ctx.fillStyle = backdrop;
       ctx.fillRect(0, 0, W, H);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.78 + Math.sin(this.time * 0.22) * 0.18;
+      ctx.drawImage(this.nebula, 0, 0);
+      ctx.restore();
+
+      this.drawStars(ctx);
+
+      const bandY = ((this.time * 26) % (H + 300)) - 150;
+      const band = ctx.createLinearGradient(0, bandY - 130, 0, bandY + 130);
+      band.addColorStop(0, 'rgba(56, 189, 248, 0)');
+      band.addColorStop(0.5, 'rgba(56, 189, 248, 0.055)');
+      band.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      ctx.fillStyle = band;
+      ctx.fillRect(0, bandY - 130, W, 260);
 
       ctx.strokeStyle = 'rgba(120, 160, 255, 0.055)';
       ctx.lineWidth = 1;
@@ -1280,6 +1709,22 @@
     }
 
     drawBricks(ctx) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      for (const brick of this.bricks) {
+        if (brick.dead) continue;
+
+        const sprite = glowSprite(brick.color, brick.w, brick.h, 7, 13);
+        const pulse =
+          0.22 + 0.12 * Math.sin(this.time * 2.2 + brick.x * 0.04 + brick.y * 0.06);
+
+        ctx.globalAlpha = brick.flash > 0 ? 0.85 : pulse;
+        ctx.drawImage(sprite.canvas, brick.x - sprite.pad, brick.y - sprite.pad);
+      }
+
+      ctx.restore();
+
       for (const brick of this.bricks) {
         if (brick.dead) continue;
 
@@ -1325,6 +1770,13 @@
 
     drawPaddle(ctx) {
       const paddle = this.paddle;
+      const glow = glowSprite('#22d3ee', paddle.w, paddle.h, 8, 20);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.4 + Math.min(0.6, this.fx.paddleGlow) * 0.6;
+      ctx.drawImage(glow.canvas, paddle.x - glow.pad, paddle.y - glow.pad);
+      ctx.restore();
 
       ctx.save();
       ctx.shadowColor = 'rgba(34, 211, 238, 0.85)';
@@ -1346,18 +1798,23 @@
 
     drawBalls(ctx) {
       for (const ball of this.balls) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+
         for (let index = 0; index < ball.trail.length; index += 1) {
           const point = ball.trail[index];
           const ratio = (index + 1) / ball.trail.length;
-          ctx.fillStyle = `rgba(125, 211, 252, ${ratio * 0.28})`;
+          ctx.globalAlpha = ratio * ratio * 0.32;
+          ctx.fillStyle = '#38bdf8';
           ctx.beginPath();
-          ctx.arc(point.x, point.y, ball.r * (0.3 + ratio * 0.6), 0, Math.PI * 2);
+          ctx.arc(point.x, point.y, ball.r * (0.32 + ratio * 0.8), 0, TAU);
           ctx.fill();
         }
 
-        ctx.save();
-        ctx.shadowColor = 'rgba(125, 211, 252, 0.95)';
-        ctx.shadowBlur = 18;
+        const glow = glowSprite('#38bdf8', ball.r * 2, ball.r * 2, ball.r, 16);
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(glow.canvas, ball.x - ball.r - glow.pad, ball.y - ball.r - glow.pad);
+        ctx.restore();
 
         const gradient = ctx.createRadialGradient(
           ball.x - 2,
@@ -1368,14 +1825,13 @@
           ball.r,
         );
         gradient.addColorStop(0, '#ffffff');
-        gradient.addColorStop(0.6, '#e0f2fe');
+        gradient.addColorStop(0.65, '#e0f2fe');
         gradient.addColorStop(1, '#7dd3fc');
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
-        ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+        ctx.arc(ball.x, ball.y, ball.r, 0, TAU);
         ctx.fill();
-        ctx.restore();
       }
     }
 
@@ -1387,6 +1843,13 @@
         const pulse = 0.7 + Math.sin(this.time * 6 + powerup.x * 0.05) * 0.3;
         const x = powerup.x - powerup.w / 2;
         const y = powerup.y - powerup.h / 2;
+        const halo = glowSprite(meta.color, powerup.w, powerup.h, powerup.h / 2, 16);
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.25 + pulse * 0.4;
+        ctx.drawImage(halo.canvas, x - halo.pad, y - halo.pad);
+        ctx.restore();
 
         ctx.save();
         ctx.shadowColor = meta.color;
@@ -1426,6 +1889,24 @@
       ctx.shadowBlur = 18;
       ctx.fillText(this.toastText, W / 2, H - 118);
       ctx.restore();
+    }
+
+    drawVignette(ctx) {
+      if (!this._vignette) {
+        this._vignette = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.95);
+        this._vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        this._vignette.addColorStop(1, 'rgba(0, 0, 0, 0.62)');
+      }
+
+      ctx.fillStyle = this._vignette;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    drawFlash(ctx) {
+      if (this.fx.flash <= 0) return;
+
+      ctx.fillStyle = `rgba(${this.fx.flashColor}, ${Math.min(0.5, this.fx.flash)})`;
+      ctx.fillRect(0, 0, W, H);
     }
   }
 
