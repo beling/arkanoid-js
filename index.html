@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#05070f" />
+    <title>Arkanoid — gra w przeglądarce</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hud">
+        <div class="hud__group">
+          <div class="stat">
+            <span class="stat__label">Wynik</span>
+            <span class="stat__value" id="score">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat__label">Rekord</span>
+            <span class="stat__value stat__value--muted" id="best">0</span>
+          </div>
+        </div>
+
+        <div class="hud__group hud__group--center">
+          <div class="stat">
+            <span class="stat__label">Poziom</span>
+            <span class="stat__value" id="level">1 / 5</span>
+          </div>
+          <div class="chips" id="effects" aria-live="polite"></div>
+        </div>
+
+        <div class="hud__group hud__group--end">
+          <div class="stat stat--right">
+            <span class="stat__label">Życia</span>
+            <span class="lives" id="lives" aria-label="Pozostałe życia"></span>
+          </div>
+          <button class="sound" id="sound" type="button" aria-pressed="true">
+            Dźwięk: wł.
+          </button>
+        </div>
+      </header>
+
+      <div class="stage" id="stage">
+        <canvas id="game" width="960" height="640" aria-label="Plansza do gry Arkanoid"></canvas>
+        <p class="hint" id="hint" hidden>
+          Kliknij lub naciśnij <kbd>Space</kbd>, aby wystrzelić
+        </p>
+        <div class="overlay" id="overlay"></div>
+      </div>
+
+      <footer class="foot">
+        <span><kbd>←</kbd> <kbd>→</kbd> / <kbd>A</kbd> <kbd>D</kbd> — paletka</span>
+        <span><kbd>Space</kbd> — wystrzał</span>
+        <span><kbd>P</kbd> / <kbd>Esc</kbd> — pauza</span>
+        <span><kbd>M</kbd> — dźwięk</span>
+      </footer>
+    </main>
+
+    <script src="js/levels.js"></script>
+    <script src="js/game.js"></script>
+  </body>
+</html>
