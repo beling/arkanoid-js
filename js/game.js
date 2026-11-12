@@ -254,13 +254,55 @@
       oscillator.stop(start + duration + 0.03);
     }
 
+    noiseBuffer() {
+      if (this._noiseBuffer) return this._noiseBuffer;
+
+      const length = Math.floor(this.ctx.sampleRate * 1.2);
+      const buffer = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let index = 0; index < length; index += 1) {
+        data[index] = Math.random() * 2 - 1;
+      }
+
+      this._noiseBuffer = buffer;
+      return buffer;
+    }
+
+    /* Szum przez filtr — „chrupnięcie” klocka i opadający podmuch przy stracie życia. */
+    noise({ duration = 0.2, volume = 0.12, freq = 1200, to = freq, q = 1, type = 'bandpass', delay = 0 }) {
+      if (!this.ctx || !this.master) return;
+
+      const start = this.ctx.currentTime + delay;
+      const source = this.ctx.createBufferSource();
+      const filter = this.ctx.createBiquadFilter();
+      const gain = this.ctx.createGain();
+
+      source.buffer = this.noiseBuffer();
+      filter.type = type;
+      filter.Q.value = q;
+      filter.frequency.setValueAtTime(Math.max(40, freq), start);
+      if (to !== freq) {
+        filter.frequency.exponentialRampToValueAtTime(Math.max(40, to), start + duration);
+      }
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(volume, start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      source.start(start, Math.random() * 0.25);
+      source.stop(start + duration + 0.03);
+    }
+
     play(name, variant = 0) {
       if (this.muted) return;
       if (!this.ensure()) return;
       this.unlock();
 
       const now = performance.now();
-      const limits = { paddle: 40, wall: 55, brick: 28, steel: 60 };
+      const limits = { paddle: 40, wall: 55, brick: 28, brickBreak: 18, steel: 60 };
       const limit = limits[name] || 0;
       if (limit > 0 && this.lastPlayed[name] && now - this.lastPlayed[name] < limit) return;
       if (limit > 0) this.lastPlayed[name] = now;
@@ -271,41 +313,75 @@
           break;
         case 'paddle':
           this.blip({ freq: 300, to: 480, duration: 0.08, type: 'square', volume: 0.1 });
+          this.noise({ duration: 0.05, volume: 0.05, freq: 2400, to: 1200, q: 1.4 });
           break;
         case 'wall':
           this.blip({ freq: 180, to: 150, duration: 0.05, type: 'sine', volume: 0.07 });
           break;
         case 'brick': {
           const freq = 420 + variant * 55;
-          this.blip({ freq, to: freq * 1.35, duration: 0.07, type: 'square', volume: 0.08 });
+          this.blip({ freq, to: freq * 1.2, duration: 0.06, type: 'square', volume: 0.06 });
+          this.noise({ duration: 0.05, volume: 0.045, freq: 3200, to: 1800, q: 2.4 });
+          break;
+        }
+        case 'brickBreak': {
+          // pełne rozbicie: chrupnięcie szkła + niski „body” + metaliczny ping
+          this.noise({ duration: 0.17, volume: 0.18, freq: 2600, to: 620, q: 0.7 });
+          this.blip({ freq: 176 + variant * 16, to: 58, duration: 0.19, type: 'triangle', volume: 0.2 });
+          this.blip({
+            freq: 880 + variant * 70,
+            to: 1680,
+            duration: 0.09,
+            type: 'sine',
+            volume: 0.055,
+            delay: 0.008,
+          });
           break;
         }
         case 'steel':
           this.blip({ freq: 1180, to: 900, duration: 0.06, type: 'square', volume: 0.06 });
           this.blip({ freq: 1720, to: 1400, duration: 0.05, volume: 0.04, delay: 0.015 });
+          this.noise({ duration: 0.05, volume: 0.05, freq: 4200, to: 2600, q: 6 });
           break;
-        case 'powerup':
-          [523.25, 659.25, 783.99].forEach((freq, index) => {
-            this.blip({ freq, duration: 0.1, volume: 0.14, delay: index * 0.07 });
+        case 'powerup': {
+          // jasny „sparkle” dopasowany do aury i błysku power-upa
+          const roots = { expand: 523.25, multi: 587.33, slow: 440 };
+          const root = roots[variant] || 523.25;
+          [1, 1.26, 1.5, 2].forEach((ratio, index) => {
+            this.blip({ freq: root * ratio, duration: 0.11, type: 'sine', volume: 0.12, delay: index * 0.065 });
           });
+          this.noise({ duration: 0.34, volume: 0.055, freq: 700, to: 7000, q: 1.8, delay: 0.02 });
           break;
+        }
         case 'life':
-          this.blip({ freq: 320, to: 110, duration: 0.5, type: 'sawtooth', volume: 0.12 });
+          // opadający podmuch zsynchronizowany z czerwoną falą i wstrząsem
+          this.blip({ freq: 180, to: 46, duration: 0.62, type: 'sine', volume: 0.22 });
+          this.blip({ freq: 320, to: 96, duration: 0.5, type: 'sawtooth', volume: 0.075 });
+          this.noise({ duration: 0.55, volume: 0.1, freq: 2000, to: 150, q: 0.8 });
+          this.blip({ freq: 110, to: 58, duration: 0.34, type: 'triangle', volume: 0.11, delay: 0.09 });
           break;
         case 'clear':
           [523.25, 659.25, 783.99, 1046.5].forEach((freq, index) => {
             this.blip({ freq, duration: 0.14, volume: 0.13, delay: index * 0.09 });
           });
+          this.noise({ duration: 0.7, volume: 0.05, freq: 900, to: 6500, q: 2 });
           break;
         case 'gameover':
           [392, 311.13, 233.08, 155.56].forEach((freq, index) => {
-            this.blip({ freq, duration: 0.22, type: 'sawtooth', volume: 0.1, delay: index * 0.12 });
+            this.blip({
+              freq,
+              duration: 0.22,
+              type: 'sawtooth',
+              volume: 0.1,
+              delay: 0.28 + index * 0.12,
+            });
           });
           break;
         case 'win':
           [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((freq, index) => {
             this.blip({ freq, duration: 0.18, volume: 0.12, delay: index * 0.1 });
           });
+          this.noise({ duration: 0.9, volume: 0.06, freq: 1000, to: 8000, q: 2 });
           break;
         default:
           break;
@@ -1060,9 +1136,10 @@
 
       brick.hp -= 1;
       brick.flash = 0.14;
-      this.audio.play('brick', Math.round((brick.y - BRICK_TOP) / (BRICK_H + ROW_GAP)));
+      const row = Math.round((brick.y - BRICK_TOP) / (BRICK_H + ROW_GAP));
 
       if (brick.hp > 0) {
+        this.audio.play('brick', row);
         this.fx.burst(centerX, centerY, brick.color, 7, 200, 2.6, 0.4);
         this.fx.addShake(0.7);
         return;
@@ -1070,6 +1147,7 @@
 
       brick.dead = true;
       this.addScore(brick.points);
+      this.audio.play('brickBreak', row);
 
       this.fx.shards(centerX, centerY, brick.color, 16);
       this.fx.burst(centerX, centerY, '#f8fafc', 5, 260, 2, 0.3);
@@ -1294,7 +1372,7 @@
 
       this.toast(meta.label);
       this.syncChips();
-      this.audio.play('powerup');
+      this.audio.play('powerup', type);
     }
 
     updateEffects(dt) {
@@ -1326,13 +1404,12 @@
       this.fx.addShake(9);
       this.fx.addFlash(0.3, '248, 113, 113');
       this.fx.ring(W / 2, H - 24, '#f87171', 320, 3.5);
+      this.audio.play('life');
 
       if (this.lives <= 0) {
         this.gameOver();
         return;
       }
-
-      this.audio.play('life');
 
       this.effects = { expand: 0, slow: 0 };
       this.powerups = [];
