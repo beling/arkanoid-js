@@ -45,9 +45,9 @@
   const LEVELS = Array.isArray(window.ARKANOID_LEVELS) ? window.ARKANOID_LEVELS : [];
 
   const POWERUPS = {
-    expand: { letter: 'W', color: '#22d3ee', label: 'SZERSZA PALETKA' },
-    multi: { letter: 'M', color: '#fbbf24', label: 'MULTI-BALL' },
-    slow: { letter: 'S', color: '#a78bfa', label: 'WOLNIEJSZA PIŁKA' },
+    expand: { color: '#22d3ee', label: 'SZERSZA PALETKA' },
+    multi: { color: '#fbbf24', label: 'MULTI-BALL' },
+    slow: { color: '#a78bfa', label: 'WOLNIEJSZA PIŁKA' },
   };
 
   const TAU = Math.PI * 2;
@@ -88,6 +88,60 @@
     const value = Number.parseInt(full, 16);
     if (!Number.isFinite(value)) return '255, 255, 255';
     return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
+  }
+
+  /*
+   * Ikony bonusów rysowane wektorowo — kapsuła jest wąska, więc każda ikona
+   * mieści się w prostokącie około 27×13 px wokół punktu (0, 0).
+   */
+  function drawPowerupIcon(ctx, type, color) {
+    if (!color) return;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (type === 'expand') {
+      // paletka z grotami rozsuwającymi ją na boki
+      roundRectPath(ctx, -8, -2.4, 16, 4.8, 2.4);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(-10.4, -3.7);
+      ctx.lineTo(-13.4, 0);
+      ctx.lineTo(-10.4, 3.7);
+      ctx.moveTo(10.4, -3.7);
+      ctx.lineTo(13.4, 0);
+      ctx.lineTo(10.4, 3.7);
+      ctx.stroke();
+    } else if (type === 'multi') {
+      // kilka piłek zamiast jednej
+      ctx.beginPath();
+      ctx.arc(0, -3.6, 2.8, 0, TAU);
+      ctx.arc(-4.8, 3.2, 2.8, 0, TAU);
+      ctx.arc(4.8, 3.2, 2.8, 0, TAU);
+      ctx.fill();
+    } else if (type === 'slow') {
+      // klepsydra — spowolnienie czasu
+      ctx.beginPath();
+      ctx.moveTo(-6, -5.2);
+      ctx.lineTo(6, -5.2);
+      ctx.moveTo(-6, 5.2);
+      ctx.lineTo(6, 5.2);
+      ctx.moveTo(-4.8, -4.2);
+      ctx.lineTo(4.8, -4.2);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(4.8, 4.2);
+      ctx.lineTo(-4.8, 4.2);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 
   /*
@@ -1944,11 +1998,10 @@
         ctx.stroke();
 
         ctx.shadowBlur = 0;
-        ctx.fillStyle = meta.color;
-        ctx.font = '700 12px ui-monospace, Consolas, monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(meta.letter, powerup.x, powerup.y + 1);
+        ctx.save();
+        ctx.translate(powerup.x, powerup.y + 0.5);
+        drawPowerupIcon(ctx, powerup.type, meta.color);
+        ctx.restore();
         ctx.restore();
       }
     }
