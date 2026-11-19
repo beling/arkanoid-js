@@ -9,6 +9,9 @@
  *
  * Każdy wiersz ma dokładnie 12 znaków, każdy poziom to siatka 12 kolumn.
  * 'speed' to bazowa prędkość piłki w pikselach na sekundę.
+ *
+ * Długość tej tablicy napędza licznik „x / N” w HUD i warunek zwycięstwa,
+ * więc nowy poziom to po prostu kolejny obiekt dopisany na końcu listy.
  */
 window.ARKANOID_LEVELS = [
   {

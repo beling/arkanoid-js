@@ -1,6 +1,15 @@
 (() => {
   'use strict';
 
+  /*
+   * Współrzędne logiczne planszy to zawsze 960×640 px, niezależnie od rozmiaru
+   * canvasu (skalowanie i DPR obsługuje resize()/render()). Jednostki: piksele,
+   * sekundy i px/s. Fizyka liczy się w stałej klatce STEP = 1/120 s, więc czasy
+   * można traktować jako sekundy niezależnie od FPS.
+   * Stałe są pogrupowane: plansza i klocki → paletka → piłka → pętla → power-upy
+   * → czasy efektów → klucze localStorage.
+   */
+
   /* ---------- Geometria planszy ---------- */
 
   const W = 960;
@@ -693,6 +702,8 @@
       this.ctx = context;
       this.dpr = 1;
 
+      // Stany: menu | ready | playing | paused | levelClear | gameOver | won.
+      // pauseReturn pamięta, czy pauza przerwała 'ready' czy 'playing'.
       this.state = 'menu';
       this.pauseReturn = 'playing';
 
